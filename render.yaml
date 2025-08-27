@@ -1,14 +1,21 @@
 services:
   - type: web
-    name: price-estimator-api
+    name: price-estimator
     env: python
-    region: oregon
-    buildCommand: pip install -r api/requirements.txt
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0
     envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: HF_TOKEN
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: HUGGINGFACE_TOKEN
         sync: false
       - key: SERPER_API_KEY
         sync: false
+      - key: DB_PATH
+        value: /var/data/db.sqlite
+    disks:
+      - name: data
+        mountPath: /var/data
