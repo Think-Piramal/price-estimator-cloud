@@ -15,7 +15,9 @@ SERPER_API_URL = "https://serper.dev/search"
 
 # Initialize SQLite database
 db_path = os.environ.get("DB_PATH", "data/db.sqlite")
-os.makedirs(os.path.dirname(db_path), exist_ok=True)  # Ensure data/ exists
+# Only create local data/ directory for non-Render environments
+if not db_path.startswith("/var/data"):
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)  # Ensure data/ exists locally
 engine = create_engine(f'sqlite:///{db_path}')
 Base = declarative_base()
 
@@ -44,7 +46,8 @@ def parse_query_with_hf(query):
         response = requests.post(HF_API_URL, headers=headers, json=payload)
         if response.status_code == 200:
             return response.json()[0]["generated_text"].strip()
-    except:
+    except Exception as e:
+        st.warning(f"Hugging Face API error: {e}")
         pass
     return query
 
@@ -65,7 +68,8 @@ def get_price_from_serper(query):
                 snippet = result.get("snippet", "")
                 if "price" in snippet.lower():
                     return snippet
-    except:
+    except Exception as e:
+        st.warning(f"Serper API error: {e}")
         pass
     return "Price not found"
 
