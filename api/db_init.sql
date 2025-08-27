@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS queries (id SERIAL PRIMARY KEY, query_text TEXT NOT NULL, location TEXT, category TEXT, created_at TIMESTAMP DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS price_observations (id SERIAL PRIMARY KEY, query_id INT REFERENCES queries(id) ON DELETE CASCADE, source_url TEXT, source_title TEXT, currency TEXT, amount NUMERIC, amount_in_inr NUMERIC, captured_at TIMESTAMP DEFAULT NOW());
