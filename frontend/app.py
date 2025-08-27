@@ -1,41 +1,115 @@
-import os, requests, pandas as pd, streamlit as st
-from dotenv import load_dotenv
-load_dotenv()
+import streamlit as st
+import requests
+import os
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from datetime import datetime
+import pandas as pd
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+# Load environment variables
+HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN")
+SERPER_API_KEY = os.environ.get("SERPER_API_KEY")
+HF_API_URL = "https://api-inference.huggingface.co/models/mixtral-8x7b"
+SERPER_API_URL = "https://serper.dev/search"
 
-st.set_page_config(page_title="Anything Anywhere - Price Estimator", page_icon="🪙")
-st.title("🪙 Anything Anywhere - Price Estimator (cloud-ready)")
+# Initialize SQLite database
+db_path = os.environ.get("DB_PATH", "data/db.sqlite")
+os.makedirs(os.path.dirname(db_path), exist_ok=True)  # Ensure data/ exists
+engine = create_engine(f'sqlite:///{db_path}')
+Base = declarative_base()
 
-with st.form("form"):
-    q = st.text_input("What do you want the price for?", placeholder="e.g., iPhone 15 128GB in Hyderabad")
-    loc = st.text_input("Location (optional)", placeholder="e.g., Hyderabad")
-    max_s = st.slider("Max sources to search", 3, 12, 6)
-    submitted = st.form_submit_button("Estimate")
+class PriceEstimate(Base):
+    __tablename__ = 'price_estimates'
+    id = Column(Integer, primary_key=True)
+    query = Column(String)
+    product_service = Column(String)
+    estimated_price = Column(Float)
+    source = Column(String)
+    timestamp = Column(DateTime)
 
-if submitted:
-    if not q or len(q) < 3:
-        st.error("Please enter a valid query")
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
+
+# Function to query Hugging Face
+def parse_query_with_hf(query):
+    if not HUGGINGFACE_TOKEN:
+        return query
+    headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
+    payload = {
+        "inputs": f"Extract the product or service from this query: {query}",
+        "parameters": {"max_new_tokens": 50}
+    }
+    try:
+        response = requests.post(HF_API_URL, headers=headers, json=payload)
+        if response.status_code == 200:
+            return response.json()[0]["generated_text"].strip()
+    except:
+        pass
+    return query
+
+# Function to get price from Serper
+def get_price_from_serper(query):
+    if not SERPER_API_KEY:
+        return "Serper API key missing"
+    headers = {
+        "X-API-KEY": SERPER_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {"q": f"{query} price"}
+    try:
+        response = requests.post(SERPER_API_URL, headers=headers, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            for result in data.get("organic", []):
+                snippet = result.get("snippet", "")
+                if "price" in snippet.lower():
+                    return snippet
+    except:
+        pass
+    return "Price not found"
+
+# Streamlit app
+st.title("Anything Anywhere Cost Estimator")
+
+# User input
+query = st.text_input("Enter product or service (e.g., 'iPhone 14 price in India', 'flight from Mumbai to Delhi')")
+
+if st.button("Get Price Estimate"):
+    if query:
+        parsed_query = parse_query_with_hf(query)
+        st.write(f"Parsed Query: {parsed_query}")
+
+        session = Session()
+        cached_result = session.query(PriceEstimate).filter_by(query=query).first()
+        if cached_result:
+            st.success(f"Cached Result: {cached_result.product_service} - ₹{cached_result.estimated_price} (Source: {cached_result.source})")
+        else:
+            price_info = get_price_from_serper(parsed_query)
+            st.write(f"Price Info: {price_info}")
+
+            estimated_price = 0.0  # Replace with actual price parsing
+            new_estimate = PriceEstimate(
+                query=query,
+                product_service=parsed_query,
+                estimated_price=estimated_price,
+                source="Serper API",
+                timestamp=datetime.now()
+            )
+            session.add(new_estimate)
+            session.commit()
+            st.success("Result cached in database!")
+        session.close()
     else:
-        try:
-            r = requests.post(f"{API_URL}/estimate", json={"query": q, "location": loc or None, "max_sources": max_s}, timeout=120)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            st.error(f"API error: {e}")
-            st.stop()
-        st.subheader("Baseline (INR)")
-        if data.get("baseline_inr"):
-            b = data["baseline_inr"]
-            st.metric("Median", f"₹ {b['median']:,.0f}")
-            st.write(f"Range: ₹ {b['low']:,.0f} – ₹ {b['high']:,.0f} (trimmed mean: ₹ {b['mean']:,.0f})")
-        else:
-            st.warning(data.get("notes", "No baseline found"))
-        st.subheader("Observations")
-        obs = pd.DataFrame(data.get("observations", []))
-        if not obs.empty:
-            st.dataframe(obs)
-        else:
-            st.info("No observations to display.")
-st.markdown("---")
-st.caption("Deploy notes: set API_URL in Streamlit secrets or env to your deployed API.")
+        st.error("Please enter a query.")
+
+if st.button("Show Cached Estimates"):
+    session = Session()
+    estimates = session.query(PriceEstimate).all()
+    if estimates:
+        df = pd.DataFrame([(e.query, e.product_service, e.estimated_price, e.source, e.timestamp) for e in estimates],
+                          columns=["Query", "Product/Service", "Price (₹)", "Source", "Timestamp"])
+        st.dataframe(df)
+    else:
+        st.write("No cached estimates found.")
+    session.close()
