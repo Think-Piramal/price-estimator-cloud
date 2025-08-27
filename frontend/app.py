@@ -3,8 +3,8 @@ import requests
 import os
 
 # Load environment variables
-HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN")
-SERPER_API_KEY = os.environ.get("SERPER_API_KEY")
+HUGGINGFACE_TOKEN = "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"
+SERPER_API_KEY = "3028b70cd2013ff71ec70dd689fe94c6dade03a0"
 HF_API_URL = "https://api-inference.huggingface.co/models/mixtral-8x7b"
 SERPER_API_URL = "https://serper.dev/search"
 
